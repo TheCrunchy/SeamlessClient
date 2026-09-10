@@ -25,7 +25,9 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
+using ParallelTasks;
 using VRage;
 using VRage.Game;
 using VRage.Game.Components;
@@ -36,6 +38,7 @@ using VRage.Network;
 using VRage.Utils;
 using VRageRender;
 using VRageRender.Messages;
+using Task = System.Threading.Tasks.Task;
 
 namespace SeamlessClient.Components
 {
@@ -127,29 +130,122 @@ namespace SeamlessClient.Components
             base.Destroy();
         }
 
+     
         private static void OnUserJoined(ref JoinResultMsg msg)
         {
             if (msg.JoinResult == JoinResult.OK && isSeamlessSwitching)
             {
-                //Invoke the switch event
-                SwitchingText = "Server Responded! Removing Old Entities and forcing client connection!";
                 EntityUtils.RemoveOldClientEntities();
                 ForceClientConnection();
                 ModAPI.ServerSwitched();
-
+     
                 //Keen, why oh why does this have to be private... And i have to send the client skins to the server???
                 UpdateLocalPlayerGameInventory.Invoke(MySession.Static.GetComponent<MySessionComponentGameInventory>(), null);
-
-
+      
                 //reset character movement
                 MySession.Static.LocalHumanPlayer?.Character?.Stand();
+     
                 isSeamlessSwitching = false;
+                StartConnectionWatchdog();
             }
             else if (msg.JoinResult != JoinResult.OK && isSeamlessSwitching)
             {
                 Seamless.TryShow($"Failed to joing the target server: {msg.JoinResult}");
                 isSeamlessSwitching = false;
             }
+        }
+
+        private static CancellationTokenSource _connectionWatchdog;
+        private static readonly TimeSpan WatchdogDuration = TimeSpan.FromSeconds(30);
+        private static readonly TimeSpan WatchdogInterval = TimeSpan.FromSeconds(5);
+
+        private static void StartConnectionWatchdog()
+        {
+            _connectionWatchdog?.Cancel();
+            _connectionWatchdog?.Dispose();
+
+            _connectionWatchdog = new CancellationTokenSource();
+            var token = _connectionWatchdog.Token;
+
+            Task.Run(async () =>
+            {
+                var start = DateTime.UtcNow;
+
+                try
+                {
+                    while (DateTime.UtcNow - start < WatchdogDuration)
+                    {
+                        token.ThrowIfCancellationRequested();
+
+                        // A new seamless transfer has started elsewhere.
+                        if (isSeamlessSwitching)
+                        {
+                            _connectionWatchdog.Cancel();
+                            return;
+                        }
+
+                        var tcs = new TaskCompletionSource<(bool healthy, double lastMsgAge)>();
+
+                        MySandboxGame.Static.Invoke(() =>
+                        {
+                            bool healthy =
+                                MySession.Static?.LocalHumanPlayer?.Identity != null &&
+                                MySession.Static?.LocalHumanPlayer?.Character != null;
+
+                            double lastMsgAge = -1;
+
+                            var totalSeconds = (DateTime.UtcNow - MyMultiplayer.Static?.LastMessageReceived)?.TotalSeconds;
+                            if (totalSeconds != null)
+                                lastMsgAge = (double)totalSeconds;
+
+                            tcs.SetResult((healthy, lastMsgAge));
+
+                        }, "ConnectionWatchdogCheck");
+
+                        var result = await tcs.Task;
+
+                        SwitchingText =
+                            $"Watchdog | LastMsg={result.lastMsgAge:F1}s | Healthy={result.healthy}";
+                        Seamless.TryShow(SwitchingText);
+
+                        // Instant reconnect if we've stopped receiving messages for 15+ seconds.
+                        if (result.lastMsgAge >= 15)
+                        {
+                            _connectionWatchdog.Cancel();
+
+                            MySandboxGame.Static.Invoke(() =>
+                            {
+                                SwitchingText = "Connection stalled (15s). Reconnecting...";
+                                Seamless.TryShow(SwitchingText);
+
+                                Instance.StartBackendSwitch(TargetServer, TargetWorld);
+                            }, "ConnectionWatchdogReconnect");
+
+                            return;
+                        }
+
+                        if (result.healthy)
+                        {
+                            _connectionWatchdog.Cancel();
+                            return;
+                        }
+
+                        await Task.Delay(WatchdogInterval, token);
+                    }
+
+                    MySandboxGame.Static.Invoke(() =>
+                    {
+                        SwitchingText = "Watchdog timed out after 5 minutes.";
+                        Seamless.TryShow(SwitchingText);
+
+                        Instance.StartBackendSwitch(TargetServer, TargetWorld);
+
+                    }, "ConnectionWatchdogTimeout");
+                }
+                catch (OperationCanceledException)
+                {
+                }
+            }, token);
         }
 
         public void StartBackendSwitch(MyGameServerItem _TargetServer, MyObjectBuilder_World _TargetWorld)
@@ -163,7 +259,7 @@ namespace SeamlessClient.Components
            
             SwitchingText = "Starting Seamless Switch... Please wait!";
             isSeamlessSwitching = true;
-            OldArmorSkin = MySession.Static.LocalHumanPlayer.BuildArmorSkin;
+            OldArmorSkin = MySession.Static?.LocalHumanPlayer?.BuildArmorSkin ?? OldArmorSkin;
             TargetServer = _TargetServer;
             TargetWorld = _TargetWorld;
 
