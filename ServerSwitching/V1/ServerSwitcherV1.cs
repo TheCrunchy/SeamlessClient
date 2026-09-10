@@ -135,6 +135,8 @@ namespace SeamlessClient.Components
         {
             if (msg.JoinResult == JoinResult.OK && isSeamlessSwitching)
             {
+                //Invoke the switch event
+                SwitchingText = "Server Responded! Removing Old Entities and forcing client connection!";
                 EntityUtils.RemoveOldClientEntities();
                 ForceClientConnection();
                 ModAPI.ServerSwitched();
@@ -146,6 +148,7 @@ namespace SeamlessClient.Components
                 MySession.Static.LocalHumanPlayer?.Character?.Stand();
      
                 isSeamlessSwitching = false;
+
                 StartConnectionWatchdog();
             }
             else if (msg.JoinResult != JoinResult.OK && isSeamlessSwitching)
@@ -156,7 +159,7 @@ namespace SeamlessClient.Components
         }
 
         private static CancellationTokenSource _connectionWatchdog;
-        private static readonly TimeSpan WatchdogDuration = TimeSpan.FromSeconds(30);
+        private static readonly TimeSpan WatchdogDuration = TimeSpan.FromMinutes(5);
         private static readonly TimeSpan WatchdogInterval = TimeSpan.FromSeconds(5);
 
         private static void StartConnectionWatchdog()
