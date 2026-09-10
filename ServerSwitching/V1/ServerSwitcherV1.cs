@@ -158,17 +158,17 @@ namespace SeamlessClient.Components
             }
         }
 
-        private static CancellationTokenSource _connectionWatchdog;
+        private static CancellationTokenSource ConnectionWatchdog;
         private static readonly TimeSpan WatchdogDuration = TimeSpan.FromMinutes(5);
         private static readonly TimeSpan WatchdogInterval = TimeSpan.FromSeconds(5);
 
         private static void StartConnectionWatchdog()
         {
-            _connectionWatchdog?.Cancel();
-            _connectionWatchdog?.Dispose();
+            ConnectionWatchdog?.Cancel();
+            ConnectionWatchdog?.Dispose();
 
-            _connectionWatchdog = new CancellationTokenSource();
-            var token = _connectionWatchdog.Token;
+            ConnectionWatchdog = new CancellationTokenSource();
+            var token = ConnectionWatchdog.Token;
 
             Task.Run(async () =>
             {
@@ -183,7 +183,7 @@ namespace SeamlessClient.Components
                         // A new seamless transfer has started elsewhere.
                         if (isSeamlessSwitching)
                         {
-                            _connectionWatchdog.Cancel();
+                            ConnectionWatchdog.Cancel();
                             return;
                         }
 
@@ -214,7 +214,7 @@ namespace SeamlessClient.Components
                         // Instant reconnect if we've stopped receiving messages for 15+ seconds.
                         if (result.lastMsgAge >= 15)
                         {
-                            _connectionWatchdog.Cancel();
+                            ConnectionWatchdog.Cancel();
 
                             MySandboxGame.Static.Invoke(() =>
                             {
@@ -229,7 +229,7 @@ namespace SeamlessClient.Components
 
                         if (result.healthy)
                         {
-                            _connectionWatchdog.Cancel();
+                            ConnectionWatchdog.Cancel();
                             return;
                         }
 
