@@ -235,15 +235,6 @@ namespace SeamlessClient.Components
 
                         await Task.Delay(WatchdogInterval, token);
                     }
-
-                    MySandboxGame.Static.Invoke(() =>
-                    {
-                        SwitchingText = "Watchdog timed out after 5 minutes.";
-                        Seamless.TryShow(SwitchingText);
-
-                        Instance.StartBackendSwitch(TargetServer, TargetWorld);
-
-                    }, "ConnectionWatchdogTimeout");
                 }
                 catch (OperationCanceledException)
                 {
